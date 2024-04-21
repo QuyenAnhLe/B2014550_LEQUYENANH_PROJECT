@@ -20,6 +20,7 @@
                     <i class="fas fa-search"></i> Tìm kiếm
                      </button>
                 </div>
+                <p v-if="noResultsFound" class="text-danger mt-4">Không có sách bạn cần tìm.</p>
                 <p class="card-text mt-4">Danh sách tìm kiếm</p>
                 <table class="table table-bordered">
                     <thead>
@@ -82,8 +83,9 @@
                                 </form>
                             </div>
                             <div class="modal-footer">
-                                <button type="button" class="btn btn-secondary" @click="closeModal">Đóng</button>
+                                <button type="button" class="btn btn-danger" @click="closeModal">Đóng</button>
                                 <button type="button" class="btn btn-primary" @click="borrowBook">Mượn sách</button>
+                                <button type="button" class="btn btn-success" @click="returnBook">Trả sách</button>
                             </div>
                         </div>
                     </div>
@@ -115,6 +117,7 @@ export default {
             borrowDate: "",
             returnDate: "",
             errorMessage: "", 
+            noResultsFound: false,
         };
     },
     methods: {
@@ -126,6 +129,9 @@ export default {
                 }
                 // Gửi yêu cầu tìm kiếm đến BookService
                 this.searchResults = await BookService.getByName(this.searchQuery);
+
+                // Kiểm tra xem có kết quả tìm kiếm hay không
+                this.noResultsFound = this.searchResults.length === 0;
             } catch (error) {
                 console.error('Lỗi khi tìm kiếm sách:', error);
             }
@@ -142,13 +148,35 @@ export default {
             this.returnDate = "";
             this.errorMessage = ""; // Reset thông báo lỗi
         },
-        async borrowBook() {
+        async returnBook() {
             try {
-                if (!localStorage.getItem('maDocGia')) {
-                    this.errorMessage = "Bạn chưa đăng nhập";
-                    return;
+
+                // Loại bỏ mã sách khỏi danh sách các cuốn sách đã mượn trong localStorage
+                let borrowedBooks = JSON.parse(localStorage.getItem('borrowedBooks')) || [];
+                const index = borrowedBooks.indexOf(this.selectedBook.maSach);
+                if (index !== -1) {
+                    borrowedBooks.splice(index, 1);
+                    localStorage.setItem('borrowedBooks', JSON.stringify(borrowedBooks));
                 }
 
+                // Tăng số lượng sách lại trong cơ sở dữ liệu
+                await BookService.update(this.selectedBook._id, { soQuyen: this.selectedBook.soQuyen + 1 });
+
+                window.alert("Trả sách thành công");
+
+                // Đặt lại giá trị cho các biến và thông báo lỗi
+                this.borrowDate = "";
+                this.returnDate = "";
+                this.errorMessage = "";
+
+            } catch (error) {
+                console.error("Lỗi khi trả sách:", error);
+            }
+        },
+        async borrowBook() {
+            try {
+                const maDocGia = localStorage.getItem('maDocGia');
+                
                 if (!this.borrowDate || !this.returnDate) {
                     this.errorMessage = "Vui lòng chọn ngày mượn và ngày trả.";
                     return;
@@ -160,23 +188,19 @@ export default {
                 }
 
                 if (this.selectedBook.soQuyen <= 0) {
-                    this.errorMessage = "Sách không còn trống để mượn.";
+                    this.errorMessage = "Sách không còn để mượn.";
                     return;
                 }
 
-                const maDocGia = localStorage.getItem('maDocGia');
-                let existingRecord = await BorrowBookService.getByMADOCGIA(maDocGia);
-
-                if (!Array.isArray(existingRecord)) {
-                    existingRecord = [];
-                }
-
-                const bookRecord = existingRecord.find(record => record.maSach === this.selectedBook.maSach);
-
-                if (bookRecord) {
+                const borrowedBooks = JSON.parse(localStorage.getItem('borrowedBooks')) || [];
+                if (borrowedBooks.includes(this.selectedBook.maSach)) {
                     this.errorMessage = "Bạn đã mượn sách này rồi.";
                     return;
                 }
+
+                // Nếu chưa mượn cuốn sách này trước đó, thêm mã sách vào danh sách đã mượn
+                borrowedBooks.push(this.selectedBook.maSach);
+                localStorage.setItem('borrowedBooks', JSON.stringify(borrowedBooks));
 
                 const response = await BorrowBookService.create({
                     maDocGia: maDocGia,
@@ -191,7 +215,6 @@ export default {
                 window.alert("Mượn sách thành công");
                 window.location.reload();
                 this.closeModal();
-
             } catch (error) {
                 console.error("Lỗi khi mượn sách:", error);
             }
